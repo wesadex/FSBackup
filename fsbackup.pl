@@ -9,6 +9,7 @@
 # -f - full_backup - полный бэкап в архив, без хэша.
 # -h - hash - только генерация хэша, без помещения файлов в архив.
 # -c - clean - очиска хранилища с инкрементальным бэкапом и создание нового бэкапа.
+# -r - rsync - используем rsync вместо cp в локальном бэкапе.
 
 #############################################
 use constant DB_DEF_CACHE_SIZE => 4096000; # Размер кэша для размежения хэша в памяти
@@ -35,6 +36,7 @@ my $cur_backup_size = 1536; # Размер блока tar
 my $backup_file_base;
 my $prog_pgp_filter;
 my $prog_gzip_filter;
+my $prog_cp;
 my $arc_ext;
 my $ftp;
 my $cur_increment_level;
@@ -62,7 +64,7 @@ my @fs_notdirmask=();  #  d! - "НЕ" маска для директории. П
 
 # ------------- Обработка параметров командной строки
 
-if ($ARGV[0] eq "-n" || $ARGV[0] eq "-h" || $ARGV[0] eq "-f" || $ARGV[0] eq "-c"){
+if ($ARGV[0] eq "-n" || $ARGV[0] eq "-h" || $ARGV[0] eq "-f" || $ARGV[0] eq "-c" || $ARGV[0] eq "-r"){
     $cfg_new_flag=1;
     $config = $ARGV[1];
 } else {
@@ -107,6 +109,13 @@ if ($ARGV[0] eq "-c" ){
 #------------------- Проверяем переменные в файле конфигурации.
 if ($cfg_backup_name !~ /^[\w\d\_]+$/){
     die "Found illegal characters in $cfg_backup_name ($cfg_backup_name).";
+}
+
+if ($prog_copy ne "") {
+	$prog_cp = $prog_copy;
+}
+else {
+	$prog_cp = "rsync -arq";
 }
 
 if (! grep {$_ eq $cfg_checksum} ("md5", "timesize")){
@@ -349,7 +358,7 @@ ftp_connect();
 if ($cfg_backup_style eq "hash"){ # Только создать хэшь без архивирования.
 
     if ( $cfg_type eq "local"){
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/.hash $cfg_local_path/.hash") == 0 || print "Local FS copy hash failed: $?";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/.hash $cfg_local_path/.hash") == 0 || print "Local FS copy hash failed: $?";
     } elsif ( $cfg_type eq "remote_ssh"){
 	system( "cat $cfg_cache_dir/$cfg_backup_name/.hash | $prog_ssh -l $cfg_remote_login $cfg_remote_host 'cat - > $cfg_remote_path/.hash'") == 0 || print "SSH connection failed (copy hash): $?\n";
     } elsif ( $cfg_type eq "remote_ftp"){
@@ -378,7 +387,7 @@ if ( $cfg_type eq "local"){
 	system( "cd $cfg_local_path; sh $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.del");
 	system( "$prog_tar -c -f - -T $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.list| $prog_tar -xf - -C $cfg_local_path") == 0 || print "Local FS sync failed (tar|untar): $?\n";
 	system( "cd $cfg_local_path; sh $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.dir");
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/.hash $cfg_local_path/$backup_file_base.hash") == 0 || print "Local FS copy failed: $?\n";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/.hash $cfg_local_path/$backup_file_base.hash") == 0 || print "Local FS copy failed: $?\n";
 
     } else {
 	if ($cfg_clean_flag == 1){ # Удалить старые копии
@@ -393,11 +402,11 @@ if ( $cfg_type eq "local"){
 		# system( "$prog_rm -f $cfg_local_path/*");
 	    }
 	}
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.list $cfg_local_path/$backup_file_base.list") == 0 || print "Local FS .list copy failed: $?\n";
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.lsize $cfg_local_path/$backup_file_base.lsize") == 0 || print "Local FS .lsize copy failed: $?\n";
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.dir $cfg_local_path/$backup_file_base.dir") == 0 || print "Local FS .dir copy failed: $?\n";
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.del $cfg_local_path/$backup_file_base.del") == 0 || print "Local FS .del copy failed: $?\n";
-	system( "cp -f $cfg_cache_dir/$cfg_backup_name/.hash $cfg_local_path/$backup_file_base.hash") == 0 || print "Local FS .hash copy failed: $?\n";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.list $cfg_local_path/$backup_file_base.list") == 0 || print "Local FS .list copy failed: $?\n";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.lsize $cfg_local_path/$backup_file_base.lsize") == 0 || print "Local FS .lsize copy failed: $?\n";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.dir $cfg_local_path/$backup_file_base.dir") == 0 || print "Local FS .dir copy failed: $?\n";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.del $cfg_local_path/$backup_file_base.del") == 0 || print "Local FS .del copy failed: $?\n";
+	system( "$prog_cp $cfg_cache_dir/$cfg_backup_name/.hash $cfg_local_path/$backup_file_base.hash") == 0 || print "Local FS .hash copy failed: $?\n";
 	# Обрабатываем разбиение на тома
 	for ($arc_block_level=0; $arc_block_level <= $#volume_position; $arc_block_level++){
 	    my $tmp_list_file = crate_tmp_list($arc_block_level, $volume_position[$arc_block_level], $volume_position[$arc_block_level+1], "$cfg_cache_dir/$cfg_backup_name/$cfg_backup_name.list");
