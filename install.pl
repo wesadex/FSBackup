@@ -48,7 +48,7 @@ print "Makeing man page...\n";
 system ("pod2man fsbackup.pl > fsbackup.1");
 print "Installing man page to $prefix_man...\n";
 system ("mkdir -p $prefix_man");
-system ("cp -f fsbackup.1 $prefix_man/fsbackup.1");
+system ("mv -f fsbackup.1 $prefix_man/fsbackup.1");
 system ("chmod 644 $prefix_man/fsbackup.1");
 
 print "Creation directory tree in $prefix...\n";
@@ -72,7 +72,7 @@ system ("cp -f README $prefix/README");
 system ("chmod 644 $prefix/README");
 system ("cp -f VERSION $prefix/VERSION");
 system ("chmod 644 $prefix/VERSION");
-system ("cp -f fsbackup.1 $prefix/fsbackup.1");
+#system ("cp -f fsbackup.1 $prefix/fsbackup.1");
 system ("chmod 644 $prefix/fsbackup.1");
 
 copyfile("fsbackup.pl", "$prefix/fsbackup.pl");
@@ -100,8 +100,8 @@ system ("chmod 711 $prefix/scripts/sqlite_backup.sh");
 copyfile("scripts/mount-windows-share.sh", "$prefix/scripts/mount-windows-share.sh");
 system ("chmod 711 $prefix/scripts/mount-windows-share.sh");
 
-print "* If you system not support MD5, please manually install module ./modules/Digest-Perl-MD5-1.5.tar.gz\n";
-print "* If Berkeley DB not installed and failed compilation of DB_File-1.77.tar.gz, please manually install DB from http://www.sleepycat.com.\n";
+print "* If your system does not support MD5, please manually install module ./modules/Digest-Perl-MD5-1.5.tar.gz\n";
+print "* If Berkeley DB is not installed and failed compilation of DB_File-1.77.tar.gz, please manually install DB from http://www.sleepycat.com.\n";
 
 while (($cur_module_path, $cur_archive)= each(%module_list)) {
     
