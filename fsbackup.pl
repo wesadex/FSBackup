@@ -5,20 +5,22 @@
 # Copyright (c) 2001-2002 by Maxim Chirkov. <mc@tyumen.ru>
 #
 # Ключи:
-# -n - создаем новый архив независимо от состояния хэша.
-# -f - full_backup - полный бэкап в архив, без хэша.
-# -h - hash - только генерация хэша, без помещения файлов в архив.
-# -c - clean - очиска хранилища с инкрементальным бэкапом и создание нового бэкапа.
-# -r - rsync - используем rsync вместо cp в локальном бэкапе.
+# -n - создаем новый архив независимо от состояния хэша (creates new archive regardless of cache state)
+# -f - full_backup - полный бэкап в архив, без хэша (moves all archives to OLD folder and creates new full backup)
+# -h - hash - только генерация хэша, без помещения файлов в архив (rebuilds cache without copying any data)
+# -c - clean - очиска хранилища с инкрементальным бэкапом и создание нового бэкапа (cleans archives and creates new full backup)
 
 #############################################
-use constant DB_DEF_CACHE_SIZE => 4096000; # Размер кэша для размежения хэша в памяти
+use constant DB_DEF_CACHE_SIZE => 409600000; # Размер кэша для размежения хэша в памяти
 
 use POSIX;
 use File::Find;
 use Digest::MD5 qw(md5_base64);
 use Net::FTP;
 use DB_File;
+
+$SIG{INT}  = \&signal_handler;
+$SIG{TERM} = \&signal_handler;
 
 use constant VERB_SILENT => 0; # Silent mode, suspend all output.
 use constant VERB_ERROR => 1; # Output all errors and warnings.
@@ -64,7 +66,7 @@ my @fs_notdirmask=();  #  d! - "НЕ" маска для директории. П
 
 # ------------- Обработка параметров командной строки
 
-if ($ARGV[0] eq "-n" || $ARGV[0] eq "-h" || $ARGV[0] eq "-f" || $ARGV[0] eq "-c" || $ARGV[0] eq "-r"){
+if ($ARGV[0] eq "-n" || $ARGV[0] eq "-h" || $ARGV[0] eq "-f" || $ARGV[0] eq "-c"){
     $cfg_new_flag=1;
     $config = $ARGV[1];
 } else {
@@ -80,7 +82,7 @@ if ( ! -f $config){
 require "$config";
 
 if ( ! -d $cfg_cache_dir){
-    die "\$cfg_cache_dir ($cfg_cache_dir) not found. Set \$cfg_cache_dir varisble in fsbackup.pl\n";
+    die "\$cfg_cache_dir ($cfg_cache_dir) not found. Set \$cfg_cache_dir variable in fsbackup.pl\n";
 }
 
 $cfg_time_limit *= 60 * 60 * 24; # Дни в секунды.
@@ -106,11 +108,11 @@ if ($ARGV[0] eq "-c" ){
     $cfg_clean_flag=0;
 }
 
-#------------------- Проверяем переменные в файле конфигурации.
+#------------------- Проверяем переменные в файле конфигурации -------------------
 if ($cfg_backup_name !~ /^[\w\d\_]+$/){
     die "Found illegal characters in $cfg_backup_name ($cfg_backup_name).";
 }
-
+# ------------------- Используем rsync вместо ср -------------------
 if ($prog_copy ne "") {
 	$prog_cp = $prog_copy;
 }
@@ -188,37 +190,39 @@ if ($cfg_increment_level != 0 && $cfg_backup_style eq "backup"){
     $cur_increment_level=0;
 
     if ( $cfg_type eq "local"){
-	opendir( DIR, "$cfg_local_path");
-	while ($cur_dir = readdir DIR){
-            if ($cur_dir =~ /^${cfg_backup_name}\-.*\-0\.tar${arc_ext}$/){
-	        $cur_increment_level++;
-	    }
+		opendir( DIR, "$cfg_local_path");
+		while ($cur_dir = readdir DIR){
+				if ($cur_dir =~ /^${cfg_backup_name}\-.*\-0\.tar${arc_ext}$/){
+				$cur_increment_level++;
+			}
+		}
+		closedir (DIR);
+    
+	} elsif ( $cfg_type eq "remote_ssh"){
+		open (DIR, "$prog_ssh -l $cfg_remote_login $cfg_remote_host 'ls $cfg_remote_path/' |") || print "SSH connection failed: $?\n";
+		while (<DIR>){
+			$cur_dir = $_;
+			if ($cur_dir =~ /${cfg_backup_name}\-.*\-0\.tar${arc_ext}$/){
+				$cur_increment_level++;
+			}
+		}
+		close (DIR);
+    
+	} elsif ( $cfg_type eq "remote_ftp"){
+		foreach $cur_dir ($ftp->ls()){
+			if ($cur_dir =~ /${cfg_backup_name}\-.*\-0\.tar${arc_ext}$/){
+				$cur_increment_level++;
+			}
+		}
 	}
-	closedir (DIR);
-
-    } elsif ( $cfg_type eq "remote_ssh"){
-
-	open (DIR, "$prog_ssh -l $cfg_remote_login $cfg_remote_host 'ls $cfg_remote_path/' |") || print "SSH connection failed: $?\n";
-	while (<DIR>){
-	    $cur_dir = $_;
-	    if ($cur_dir =~ /${cfg_backup_name}\-.*\-0\.tar${arc_ext}$/){
-	        $cur_increment_level++;
-	    }
-	}
-	close (DIR);
-    } elsif ( $cfg_type eq "remote_ftp"){
-	foreach $cur_dir ($ftp->ls()){
-	    if ($cur_dir =~ /${cfg_backup_name}\-.*\-0\.tar${arc_ext}$/){
-	        $cur_increment_level++;
-	    }
-	}
-    }
-    if ($cur_increment_level >= $cfg_increment_level){
+	
+	if ($cur_increment_level >= $cfg_increment_level){
 	$cfg_new_flag=1;
 	$cfg_clean_flag=1;
-    }
-    print "Current increment number: $cur_increment_level\n" if ($cfg_verbose == &VERB_ALL);
+	}
+	print "Current increment number: $cur_increment_level\n" if ($cfg_verbose == &VERB_ALL);
 }
+
 ################################################
 #----------- Считываем хэш в память.
 
@@ -533,6 +537,12 @@ exit (0);
 
 
 ########################################
+sub signal_handler {
+    die "Caught a signal $!";
+	# Here must be removing opf any lock files/dirs
+}
+# Trap of termination of script
+
 sub add_to_backup{
   my($file_name, $file_dir, $md5_checksum_stat, $checksum_stat);
   my($tmp, $stat_mode, $stat_uid, $stat_gid, $stat_size, $stat_mtime, $stat_time);
